@@ -56,20 +56,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Setup Rust toolchain
-        uses: actions-rust-lang/setup-rust-toolchain@a188e68d0fd2bd36ad51dccb2b07ba6e75105f30 # v2.0.1
-        with:
-          cache: false
-          rustflags: ""
-
-      - name: Cache Rust workspace
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          cache-bin: false
-          cache-workspace-crates: true
-          shared-key: delivery-portable
-          workspaces: |
-            . -> target
+      - uses: ./.github/actions/setup-release-binary
 
       - name: Download last_sent artifact from previous successful run
         env:
@@ -176,7 +163,7 @@ jobs:
           set -euo pipefail
 
           rm -f output_*.md
-          cargo run --quiet --bin twir-deploy-notify -- "$LATEST_POST"
+          ./twir-deploy-notify "$LATEST_POST"
 
       - name: Restore durable production progress
         if: steps.prepare.outputs.send == 'true' && inputs.send_main == true
@@ -208,7 +195,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          cargo run --quiet --bin twir-deploy-notify -- "$LATEST_POST"
+          ./twir-deploy-notify "$LATEST_POST"
 
       - name: Save last_sent marker
         env:

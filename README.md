@@ -14,6 +14,21 @@ What it does:
 5. Pins the first sent message and removes the service notification.
 6. Cleans up any previously generated `output_*.md` files before writing new ones.
 
+## Release and runtime model
+
+The scheduled delivery pipeline never compiles. `release.yml` builds
+`twir-deploy-notify` once with `cargo build --release --locked --bin
+twir-deploy-notify` when source, dependency or toolchain files change on `main`,
+then publishes the executable and a protocol 2 `delivery-manifest.json` to the
+`latest` release. The manifest records the source commit SHA and the binary's
+SHA-256.
+
+`common-delivery.yml` uses `setup-release-binary` to download the published
+binary, wait for protocol 2 during a release cutover, and verify the hash with
+system tools before executing it. A missing or stale manifest fails closed, so
+an older release is never run by accident. The Python delivery-state helper is
+unchanged: it still owns the durable checkpoint on the `delivery-state` branch.
+
 ## Why it exists
 
 - TWIR issues are long, and Telegram has message size limits.
