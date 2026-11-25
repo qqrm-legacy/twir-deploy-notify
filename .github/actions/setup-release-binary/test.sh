@@ -5,6 +5,7 @@
 set -euo pipefail
 
 setup="$(cd "$(dirname "$0")" && pwd)/setup.sh"
+publication_check="$(cd "$(dirname "$0")/../.." && pwd)/scripts/verify-publication-sha.sh"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 cd "$work"
@@ -12,6 +13,7 @@ mkdir -p fixtures bin
 export FIXTURES="$work/fixtures"
 export CLOCK_FILE="$work/clock"
 export MANIFEST_CALLS="$work/manifest_calls"
+export BINARY_CALLS="$work/binary_calls"
 export PATH="$work/bin:$PATH"
 export RELEASE_WAIT_SECONDS=0
 
@@ -53,7 +55,11 @@ if [[ "$asset" == delivery-manifest.json ]]; then
   src="$FIXTURES/manifest.$n"
   [[ -f "$src" ]] || src="$FIXTURES/delivery-manifest.json"
 else
-  src="$FIXTURES/$asset"
+  n="$(cat "$BINARY_CALLS" 2>/dev/null || echo 0)"
+  n=$((n + 1))
+  echo "$n" > "$BINARY_CALLS"
+  src="$FIXTURES/$asset.$n"
+  [[ -f "$src" ]] || src="$FIXTURES/$asset"
 fi
 [[ -f "$src" ]] || { echo "missing fixture asset: $asset" >&2; exit 22; }
 cp "$src" "$out"
@@ -73,8 +79,9 @@ manifest() {
 }
 
 reset() {
-  rm -f bot delivery-manifest.json fixtures/downloads "$MANIFEST_CALLS"
-  rm -f fixtures/manifest.1 fixtures/manifest.2
+  rm -f bot delivery-manifest.json fixtures/downloads
+  rm -f "$MANIFEST_CALLS" "$BINARY_CALLS"
+  rm -f fixtures/manifest.1 fixtures/manifest.2 fixtures/bot.1 fixtures/bot.2
   echo 0 > "$CLOCK_FILE"
   export RELEASE_WAIT_SECONDS=0
 }
@@ -145,8 +152,17 @@ rm -f fixtures/bot
 reject "$sha" "missing binary"
 printf 'test binary\n' > fixtures/bot
 
-# Invalid checked-out SHA fails without contacting the release.
+# Invalid inputs fail without contacting the release.
 reject deadbeef "malformed checked-out SHA"
+test ! -e fixtures/downloads
+reset
+manifest "$sha" "$hash" 2
+if RELEASE_WAIT_SECONDS=abc bash "$setup" example/repo bot "$sha"; then
+  echo "Unexpected acceptance with invalid RELEASE_WAIT_SECONDS" >&2
+  exit 1
+fi
+test ! -e bot
+test ! -e fixtures/downloads
 
 # Concurrent publication: the first manifest is stale, the second is correct.
 reset
@@ -161,6 +177,18 @@ cmp -s delivery-manifest.json fixtures/manifest.2
 [[ "$(cat fixtures/downloads)" == $'delivery-manifest.json\ndelivery-manifest.json\nbot' ]] ||
   { echo "Retry did not re-fetch the manifest first" >&2; exit 1; }
 
+# Concurrent publication: a valid manifest with a transiently stale binary
+# must be retried rather than rejected outright.
+reset
+manifest "$sha" "$hash" 2
+printf 'stale binary\n' > fixtures/bot.1
+printf 'test binary\n' > fixtures/bot.2
+RELEASE_WAIT_SECONDS=60 bash "$setup" example/repo bot "$sha"
+test -x bot
+cmp -s bot fixtures/bot.2
+[[ "$(cat fixtures/downloads)" == $'delivery-manifest.json\nbot\ndelivery-manifest.json\nbot' ]] ||
+  { echo "Checksum mismatch was not retried" >&2; exit 1; }
+
 # Retry timeout: persistently stale assets fail closed after the deadline.
 reset
 manifest "$older" "$hash" 2
@@ -172,5 +200,17 @@ test ! -e bot
 test ! -e delivery-manifest.json
 [[ "$(cat fixtures/downloads)" == $'delivery-manifest.json\ndelivery-manifest.json' ]] ||
   { echo "Expected one retry before the timeout" >&2; exit 1; }
+
+# Publication controller: expected_sha is optional but must match when given.
+bash "$publication_check" "" "$sha"
+bash "$publication_check" "$sha" "$sha"
+if bash "$publication_check" "$older" "$sha"; then
+  echo "Mismatched expected_sha was accepted" >&2
+  exit 1
+fi
+if bash "$publication_check" deadbeef "$sha"; then
+  echo "Malformed expected_sha was accepted" >&2
+  exit 1
+fi
 
 printf 'Release selection regression tests passed.\n'

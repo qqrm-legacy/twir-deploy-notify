@@ -41,7 +41,7 @@ Delivery jobs never compile the bot locally. The `setup-release-binary` action
 installs the binary published by the `Release Binary` workflow and executes it
 only when all three checks pass:
 
-- manifest `protocol` is exactly numeric `2`;
+- manifest `protocol` is numeric `2`;
 - manifest `source_sha` equals the checked-out commit SHA byte for byte;
 - SHA-256 of the downloaded binary equals manifest `sha256`.
 
@@ -51,9 +51,9 @@ downloads a binary, retries inconsistent assets until a deadline, and fails
 closed without leaving a binary in the workspace. It never falls back to an
 older release. Because the gate uses the exact checked-out SHA, the release
 workflow publishes on every push to `main` (including documentation-only
-commits) and manual dispatch accepts only an `expected_sha` matching the
-dispatched commit. A checkout from a non-`main` branch cannot find a matching
-release and is therefore rejected.
+commits), and manual dispatch accepts an optional `expected_sha` that must
+match the dispatched commit when supplied. A checkout whose commit was never
+published on `main` cannot find a matching release and is therefore rejected.
 
 Immutable per-commit assets would remove the transient inconsistency, but every
 consumer would have to know the exact release to fetch and storage would grow

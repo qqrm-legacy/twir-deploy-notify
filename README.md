@@ -19,8 +19,9 @@ What it does:
 The scheduled delivery pipeline never compiles. `release.yml` builds
 `twir-deploy-notify` with `cargo build --release --locked --bin
 twir-deploy-notify` on every push to `main` (including documentation-only
-commits) and on manual dispatch whose `expected_sha` matches the dispatched
-commit. It publishes the executable and a protocol 2 `delivery-manifest.json`
+commits) and on manual dispatch, where an optional `expected_sha` must match
+the dispatched commit when supplied. It publishes the executable and a protocol
+2 `delivery-manifest.json`
 to the `latest` release. The manifest records the source commit SHA and the
 binary's SHA-256.
 

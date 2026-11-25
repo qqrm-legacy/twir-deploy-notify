@@ -13,9 +13,11 @@ on:
 permissions:
   contents: write
 
+# Every published main commit needs a complete release for exact-SHA matching.
+# Cancelling an in-flight build can strand delivery jobs pinned to that commit.
 concurrency:
   group: release-binary-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -27,12 +29,7 @@ jobs:
         env:
           EXPECTED_SHA: ${{ inputs.expected_sha }}
           ACTUAL_SHA: ${{ github.sha }}
-        run: |
-          set -euo pipefail
-          if [ -n "$EXPECTED_SHA" ]; then
-            [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
-            test "$ACTUAL_SHA" = "$EXPECTED_SHA"
-          fi
+        run: bash .github/scripts/verify-publication-sha.sh "$EXPECTED_SHA" "$ACTUAL_SHA"
 
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
