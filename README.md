@@ -17,16 +17,19 @@ What it does:
 ## Release and runtime model
 
 The scheduled delivery pipeline never compiles. `release.yml` builds
-`twir-deploy-notify` once with `cargo build --release --locked --bin
-twir-deploy-notify` when source, dependency or toolchain files change on `main`,
-then publishes the executable and a protocol 2 `delivery-manifest.json` to the
-`latest` release. The manifest records the source commit SHA and the binary's
-SHA-256.
+`twir-deploy-notify` with `cargo build --release --locked --bin
+twir-deploy-notify` on every push to `main` (including documentation-only
+commits) and on manual dispatch whose `expected_sha` matches the dispatched
+commit. It publishes the executable and a protocol 2 `delivery-manifest.json`
+to the `latest` release. The manifest records the source commit SHA and the
+binary's SHA-256.
 
 `common-delivery.yml` uses `setup-release-binary` to download the published
-binary, wait for protocol 2 during a release cutover, and verify the hash with
-system tools before executing it. A missing or stale manifest fails closed, so
-an older release is never run by accident. The Python delivery-state helper is
+binary and require protocol 2, an exact match between the manifest's
+`source_sha` and the checked-out commit, and a matching SHA-256 before
+execution. Temporary inconsistencies during publication are retried until a
+deadline; a missing, stale or unverifiable release fails closed, so an older
+release is never run by accident. The Python delivery-state helper is
 unchanged: it still owns the durable checkpoint on the `delivery-state` branch.
 
 ## Why it exists

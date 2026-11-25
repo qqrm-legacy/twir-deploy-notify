@@ -35,6 +35,31 @@ The crate turns "This Week in Rust" Markdown into Telegram posts.
 3. Developer deliveries are not pinned; once the final acknowledgement is observed the CLI records the exact acknowledgement count and only proceeds when it matches the number of posts prepared for delivery.
 4. Production credentials are fetched only after the developer delivery succeeds with a full set of acknowledgements. The exact same posts are then sent to the production chat with the same acknowledgement-and-delay semantics. If any send fails or the acknowledgements do not cover every post, the pipeline aborts before touching the production chat.
 
+## Release Binary Contract
+
+Delivery jobs never compile the bot locally. The `setup-release-binary` action
+installs the binary published by the `Release Binary` workflow and executes it
+only when all three checks pass:
+
+- manifest `protocol` is exactly numeric `2`;
+- manifest `source_sha` equals the checked-out commit SHA byte for byte;
+- SHA-256 of the downloaded binary equals manifest `sha256`.
+
+The `latest` release assets are mutable and can briefly disagree while a new
+release is being published. The installer validates the manifest before it
+downloads a binary, retries inconsistent assets until a deadline, and fails
+closed without leaving a binary in the workspace. It never falls back to an
+older release. Because the gate uses the exact checked-out SHA, the release
+workflow publishes on every push to `main` (including documentation-only
+commits) and manual dispatch accepts only an `expected_sha` matching the
+dispatched commit. A checkout from a non-`main` branch cannot find a matching
+release and is therefore rejected.
+
+Immutable per-commit assets would remove the transient inconsistency, but every
+consumer would have to know the exact release to fetch and storage would grow
+with every commit. The strict SHA gate plus bounded retry already prevents a
+wrong binary from executing, so the mutable `latest` strategy is kept.
+
 ## Delivery State Contract
 
 The production workflow is stateful. Its idempotency depends on the following
