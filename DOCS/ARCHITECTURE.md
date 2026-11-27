@@ -35,7 +35,38 @@ The crate turns "This Week in Rust" Markdown into Telegram posts.
 3. Developer deliveries are not pinned; once the final acknowledgement is observed the CLI records the exact acknowledgement count and only proceeds when it matches the number of posts prepared for delivery.
 4. Production credentials are fetched only after the developer delivery succeeds with a full set of acknowledgements. The exact same posts are then sent to the production chat with the same acknowledgement-and-delay semantics. If any send fails or the acknowledgements do not cover every post, the pipeline aborts before touching the production chat.
 
+## Release Binary Contract
+
+Delivery jobs never compile the bot locally. The `setup-release-binary` action
+installs the binary published by the `Release Binary` workflow and executes it
+only when all three checks pass:
+
+- manifest `protocol` is numeric `2`;
+- manifest `source_sha` equals the checked-out commit SHA byte for byte;
+- SHA-256 of the downloaded binary equals manifest `sha256`.
+
+The `latest` release assets are mutable and can briefly disagree while a new
+release is being published. The installer validates the manifest before it
+downloads a binary, retries inconsistent assets until a deadline, and fails
+closed without leaving a binary in the workspace. It never falls back to an
+older release. Because the gate uses the exact checked-out SHA, the release
+workflow publishes on every push to `main` (including documentation-only
+commits), and manual dispatch accepts an optional `expected_sha` that must
+match the dispatched commit when supplied. A checkout whose commit was never
+published on `main` cannot find a matching release and is therefore rejected.
+
+Immutable per-commit assets would remove the transient inconsistency, but every
+consumer would have to know the exact release to fetch and storage would grow
+with every commit. The strict SHA gate plus bounded retry already prevents a
+wrong binary from executing, so the mutable `latest` strategy is kept.
+
 ## Delivery State Contract
+
+Production checks run twice daily, at 10:00 and 14:00 Moscow time (07:00 and
+11:00 UTC). The afternoon run is a fallback check, not a second publication:
+when the same issue was already delivered, preflight skips both delivery jobs
+and carries the production marker forward. Deduplication is per issue, so a
+missed morning delivery can still complete during the afternoon run.
 
 The production workflow is stateful. Its idempotency depends on the following
 files and GitHub Actions artifacts being present and passed from one successful
@@ -57,16 +88,32 @@ both deliveries when they match. Do not remove, rename, or make the production
 marker conditional on a delivery without updating this contract and its
 regression test. In particular, a no-op run without `last-sent-prod` breaks the
 state chain and can cause the next run to resend an already delivered issue.
-Because the production preflight downloads the marker before checking out any
-repository, its GitHub CLI calls must pass `--repo "${{ github.repository }}"`.
+The production preflight first checks out this repository to load the shared
+marker restore helper. Its GitHub API paths explicitly name `GITHUB_REPOSITORY`;
+the upstream TWIR checkout remains in the separate `twir` directory.
 
 Marker recovery reads the latest 100 production workflow runs without
 server-side status or branch filters, then selects up to ten successful runs
-locally. Those filters have returned stale run indexes. Successful manual
-production deliveries from release branches are included, so a recovery's
-marker carries forward to scheduled runs on `main`. The first usable marker
-is restored; if none is available, delivery proceeds with the Telegram pin
-guard still enabled. Failed deliveries do not publish a new marker.
+locally, after validating their provenance. Those filters have returned stale
+run indexes. A producer must be a completed successful `prod.yml` run with the
+same repository and head-repository ID. Scheduled runs must use the default
+branch. Same-repository `workflow_dispatch` runs may use recovery branches:
+dispatching them already requires write access, and their markers must carry
+forward to scheduled runs on `main`. PR, push and other event types are not
+marker sources. The current run is excluded, including previous attempts.
+
+The artifact must identify that exact run, branch, source SHA and repository.
+The helper downloads its ZIP into a temporary directory outside the checkout,
+checks its digest when available, and reads it without extracting any paths.
+Only a single ordinary root-level `last_sent.txt` file is allowed (512 bytes
+maximum, within a 64 KiB archive). Its content must be one UTF-8 TWIR source
+path. Additional files, links, unexpected paths and invalid markers are
+rejected; only validated marker text is atomically written to the workspace.
+Legacy `last-sent` names and the existing per-scope fallback order remain
+supported. The first usable marker is restored; rejected or missing artifacts
+fall back to older trusted runs. If none is available, delivery proceeds with
+the durable checkpoint and Telegram pin guard still enabled. Failed deliveries
+do not publish a new marker.
 
 ## Telegram Pin Guard
 
