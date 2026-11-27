@@ -62,6 +62,12 @@ wrong binary from executing, so the mutable `latest` strategy is kept.
 
 ## Delivery State Contract
 
+Production checks run twice daily, at 10:00 and 14:00 Moscow time (07:00 and
+11:00 UTC). The afternoon run is a fallback check, not a second publication:
+when the same issue was already delivered, preflight skips both delivery jobs
+and carries the production marker forward. Deduplication is per issue, so a
+missed morning delivery can still complete during the afternoon run.
+
 The production workflow is stateful. Its idempotency depends on the following
 files and GitHub Actions artifacts being present and passed from one successful
 production run to the next:

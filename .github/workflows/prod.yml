@@ -2,8 +2,8 @@ name: TWIR Prod summary
 
 on:
   schedule:
-    # once per day
-    - cron: '0 8 * * *'
+    # Check at 10:00 and 14:00 Moscow time (UTC+3); the second run is a fallback.
+    - cron: '0 7,11 * * *'
   workflow_dispatch:
 
 concurrency:
