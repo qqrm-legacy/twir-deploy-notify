@@ -82,16 +82,32 @@ both deliveries when they match. Do not remove, rename, or make the production
 marker conditional on a delivery without updating this contract and its
 regression test. In particular, a no-op run without `last-sent-prod` breaks the
 state chain and can cause the next run to resend an already delivered issue.
-Because the production preflight downloads the marker before checking out any
-repository, its GitHub CLI calls must pass `--repo "${{ github.repository }}"`.
+The production preflight first checks out this repository to load the shared
+marker restore helper. Its GitHub API paths explicitly name `GITHUB_REPOSITORY`;
+the upstream TWIR checkout remains in the separate `twir` directory.
 
 Marker recovery reads the latest 100 production workflow runs without
 server-side status or branch filters, then selects up to ten successful runs
-locally. Those filters have returned stale run indexes. Successful manual
-production deliveries from release branches are included, so a recovery's
-marker carries forward to scheduled runs on `main`. The first usable marker
-is restored; if none is available, delivery proceeds with the Telegram pin
-guard still enabled. Failed deliveries do not publish a new marker.
+locally, after validating their provenance. Those filters have returned stale
+run indexes. A producer must be a completed successful `prod.yml` run with the
+same repository and head-repository ID. Scheduled runs must use the default
+branch. Same-repository `workflow_dispatch` runs may use recovery branches:
+dispatching them already requires write access, and their markers must carry
+forward to scheduled runs on `main`. PR, push and other event types are not
+marker sources. The current run is excluded, including previous attempts.
+
+The artifact must identify that exact run, branch, source SHA and repository.
+The helper downloads its ZIP into a temporary directory outside the checkout,
+checks its digest when available, and reads it without extracting any paths.
+Only a single ordinary root-level `last_sent.txt` file is allowed (512 bytes
+maximum, within a 64 KiB archive). Its content must be one UTF-8 TWIR source
+path. Additional files, links, unexpected paths and invalid markers are
+rejected; only validated marker text is atomically written to the workspace.
+Legacy `last-sent` names and the existing per-scope fallback order remain
+supported. The first usable marker is restored; rejected or missing artifacts
+fall back to older trusted runs. If none is available, delivery proceeds with
+the durable checkpoint and Telegram pin guard still enabled. Failed deliveries
+do not publish a new marker.
 
 ## Telegram Pin Guard
 

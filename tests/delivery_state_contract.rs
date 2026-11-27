@@ -5,42 +5,28 @@ fn workflow(name: &str) -> String {
         .unwrap_or_else(|error| panic!("failed to read {name}: {error}"))
 }
 
+fn assert_safe_marker_restore(workflow: &str) {
+    let checkout = workflow
+        .find("- name: Checkout repository")
+        .expect("the trusted marker helper must be checked out before it runs");
+    let restore = workflow
+        .find("python3 -I .github/scripts/restore_marker.py")
+        .expect("marker recovery must use the shared isolated data-only helper");
+    assert!(checkout < restore);
+    assert!(workflow.contains("DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}"));
+    assert!(
+        !workflow.contains("gh run download"),
+        "workflows must not extract an entire artifact into the checkout"
+    );
+}
+
 #[test]
 fn production_workflow_preserves_the_marker_across_noop_runs() {
     let production = workflow("prod.yml");
-
-    // The filtered `gh run list` goes through a search index that is
-    // intermittently stale, so the previous run must be resolved through the
-    // REST endpoint instead.
-    assert!(
-        !production.contains("gh run list"),
-        "production workflow must not resolve the previous run via gh run list (stale index)"
-    );
-    assert!(
-        production.contains(
-            "repos/${{ github.repository }}/actions/workflows/prod.yml/runs?per_page=100"
-        ),
-        "production workflow is missing the REST lookup of the previous production run"
-    );
-
-    // The REST endpoint serves stale data too (it once named an April run as
-    // "latest"), so a single lookup is not enough: the workflow must walk the
-    // recent successful runs until one yields a usable marker, and a missing
-    // marker must warn rather than abort — the chain is rebuilt on delivery.
-    assert!(
-        production.contains("select(.conclusion == \"success\")][0:10][]")
-            && !production.contains("status=success")
-            && !production.contains("branch=main"),
-        "production workflow must walk several recent runs, not trust one lookup"
-    );
-    assert!(
-        !production.contains("refusing to publish"),
-        "a broken marker chain must warn and rebuild, never abort the run"
-    );
+    assert_safe_marker_restore(&production);
 
     for required in [
-        "--repo \"${{ github.repository }}\"",
-        "for name in last-sent-prod last-sent; do",
+        "python3 -I .github/scripts/restore_marker.py prod",
         "last_sent=$(cat last_sent.txt 2>/dev/null || echo \"\")",
         "- name: Preserve last_sent marker when delivery is not needed",
         "if: steps.decide.outputs.should_send == 'false'",
@@ -59,40 +45,14 @@ fn production_workflow_preserves_the_marker_across_noop_runs() {
 #[test]
 fn delivery_workflow_writes_the_marker_only_after_a_delivery() {
     let delivery = workflow("common-delivery.yml");
-
-    // The filtered `gh run list` goes through a search index that is
-    // intermittently stale, so the previous run must be resolved through the
-    // REST endpoint instead.
-    assert!(
-        !delivery.contains("gh run list"),
-        "common delivery workflow must not resolve the previous run via gh run list (stale index)"
-    );
-    assert!(
-        delivery.contains(
-            "repos/${{ github.repository }}/actions/workflows/prod.yml/runs?per_page=100"
-        ),
-        "common delivery workflow is missing the REST lookup of the previous production run"
-    );
-
-    // Same as the production workflow: walk several recent runs, warn instead
-    // of aborting when the chain is broken.
-    assert!(
-        delivery.contains("select(.conclusion == \"success\")][0:10][]")
-            && !delivery.contains("status=success")
-            && !delivery.contains("branch=main"),
-        "common delivery workflow must walk several recent runs, not trust one lookup"
-    );
-    assert!(
-        !delivery.contains("refusing to publish")
-            && !delivery.contains("requires a valid last-sent marker"),
-        "a broken marker chain must warn and rebuild, never abort the run"
-    );
+    assert_safe_marker_restore(&delivery);
     assert!(
         !delivery.contains("if: always()\n        uses: actions/upload-artifact@v7\n        with:\n          name: last-sent-"),
         "the last_sent artifact must be uploaded only by successful runs"
     );
 
     for required in [
+        "python3 -I .github/scripts/restore_marker.py \"$ARTIFACT_SCOPE\"",
         "- name: Save last_sent marker",
         "steps.prepare.outputs.send == 'true' && (inputs.send_main == true || inputs.send_dev == true)",
         "printf '%s\\n' \"$LATEST_POST\" > last_sent.txt",

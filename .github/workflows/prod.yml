@@ -25,36 +25,15 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
       - name: Download last_sent artifact from previous production run
-        run: |
-          set -euo pipefail
-
-          # Server-side status/branch filters can return a stale run index.
-          # Filter the recent runs locally and include successful manual
-          # production deliveries from release branches so their markers
-          # carry forward to main after a recovery.
-          ids=$(
-            gh api \
-              "repos/${{ github.repository }}/actions/workflows/prod.yml/runs?per_page=100" \
-              --jq '[.workflow_runs[] | select(.conclusion == "success")][0:10][] | .id' \
-            || echo ""
-          )
-
-          for prev in $ids; do
-            for name in last-sent-prod last-sent; do
-              if gh run download "$prev" --repo "${{ github.repository }}" -n "$name" --dir . && [ -s last_sent.txt ]; then
-                echo "Restored last_sent marker from run $prev (artifact $name)."
-                exit 0
-              fi
-              rm -f last_sent.txt
-            done
-          done
-
-          # The marker chain must never break a run: with no inherited marker
-          # the delivery below treats the newest issue as unsent (the pin
-          # guard still blocks a prod duplicate) and this run republishes the
-          # marker, rebuilding the chain for the next run.
-          echo "::warning::No recent production run yielded a last_sent marker; continuing without cached state." >&2
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: python3 -I .github/scripts/restore_marker.py prod
 
       - name: Checkout TWIR
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

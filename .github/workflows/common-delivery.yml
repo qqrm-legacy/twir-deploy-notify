@@ -61,62 +61,8 @@ jobs:
       - name: Download last_sent artifact from previous successful run
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-
-          # Server-side status/branch filters can return a stale run index.
-          # Filter the recent runs locally and include successful manual
-          # production deliveries from release branches so their markers
-          # carry forward to main after a recovery.
-          ids=$(
-            gh api \
-              "repos/${{ github.repository }}/actions/workflows/prod.yml/runs?per_page=100" \
-              --jq '[.workflow_runs[] | select(.conclusion == "success")][0:10][] | .id' \
-            || echo ""
-          )
-
-          scope="$ARTIFACT_SCOPE"
-          names=()
-
-          append_unique() {
-            local candidate="$1"
-            if [ -z "$candidate" ]; then
-              return 0
-            fi
-            for existing in "${names[@]}"; do
-              if [ "$existing" = "$candidate" ]; then
-                return 0
-              fi
-            done
-            names+=("$candidate")
-          }
-
-          if [ -n "$scope" ]; then
-            append_unique "last-sent-$scope"
-            IFS='-' read -r -a scope_parts <<< "$scope"
-            for part in "${scope_parts[@]}"; do
-              if [ -n "$part" ]; then
-                append_unique "last-sent-$part"
-              fi
-            done
-          fi
-
-          append_unique "last-sent"
-
-          for prev in $ids; do
-            for name in "${names[@]}"; do
-              if gh run download "$prev" -n "$name" --dir . && [ -s last_sent.txt ]; then
-                echo "Restored last_sent marker from run $prev (artifact $name)."
-                exit 0
-              fi
-              rm -f last_sent.txt
-            done
-          done
-
-          # The marker chain must never break a run: continue without cached
-          # state; a successful delivery below republishes the marker and
-          # rebuilds the chain (the prod pin guard still blocks duplicates).
-          echo "::warning::No recent run yielded a last_sent marker; continuing without cached state." >&2
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: python3 -I .github/scripts/restore_marker.py "$ARTIFACT_SCOPE"
 
       - name: Checkout TWIR
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
